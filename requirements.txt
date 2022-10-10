@@ -1,10 +1,10 @@
-numpy==1.19.0
-scipy==1.5.0
+numpy==1.21.6
+scipy==1.5.3
 scikit-learn==0.23.1
 pandas==1.0.5
 matplotlib==3.3.0
 tensorflow==1.15.0
 tensorflow-probability==0.8.0
 gpflow==1.5.1
-cplot==0.3.4
-git+git://github.com/ICL-SML/Doubly-Stochastic-DGP@master#egg=doubly_stochastic_dgp
+cplot==0.9.3
+git+https://github.com/UCL-SML/Doubly-Stochastic-DGP.git@31527b596e52c453c9810f9e936e65f55da8a365#egg=doubly_stochastic_dgp
