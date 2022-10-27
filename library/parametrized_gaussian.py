@@ -14,61 +14,50 @@
 
 import gpflow
 import tensorflow as tf
+import tensorflow_probability as tfp
 import numpy as np
+from gpflow import Module, Parameter
 
-from gpflow.params import Parameter, Parameterized
-from gpflow.decors import params_as_tensors
-from . import transforms
-from .helper import batched_identity
+from library.helper import batched_identity
+from library.bijectors import FillDiagonal
 
-float_type = gpflow.settings.float_type
+float_type = gpflow.config.default_float()
+
+covariance_matrix_bijector = tfp.bijectors.FillScaleTriL(diag_bijector=gpflow.utilities.positive(), diag_shift=None)
+diagonal_variance_bijector = tfp.bijectors.Chain([
+    FillDiagonal(),
+    gpflow.utilities.positive()
+], name='FillPositiveDiagonal')
 
 
-class MeanFieldGaussian(Parameterized):
+class MeanFieldGaussian(Module):
     def __init__(
-        self, n, batch_dims=(), full_cov=True, diagonal=False, shared_cov={}, name=None
+            self, n, batch_dims=(), full_cov=True, shared_cov=None, name=None
     ):
         super().__init__(name=name)
+        if shared_cov is None:
+            shared_cov = set()
+        assert shared_cov.intersection(range(len(batch_dims))) == shared_cov, "shared_cov doesn't match batch_dims"
+
         dims = (*batch_dims, n)
+        self.mean = Parameter(np.zeros(dims, dtype=float_type))
 
-        if len(batch_dims) > 1 and set(shared_cov) != set(range(1, len(batch_dims))):
-            raise NotImplementedError("Covariance must be shared in all dimensions")
+        shared_batch = tuple(
+            d if i not in shared_cov else 1
+            for i, d in enumerate(batch_dims)
+        )
 
-        if not diagonal:
-            self.mean = Parameter(np.zeros(dims, dtype=float_type))
-
-            # TODO -- HACK
-            if len(batch_dims) == 1 and set(shared_cov) == {1}:
-                batch_dims[0] = 1
-
-            if full_cov:
-                self.chol_cov = Parameter(
-                    batched_identity(n, (batch_dims[0],)),
-                    transform=transforms.CovarianceMatrix(n, batch_dims[0]),
-                )
-            else:
-                self.chol_cov = Parameter(
-                    batched_identity(n, (batch_dims[0],)),
-                    transform=transforms.DiagonalMatrix()(gpflow.transforms.positive),
-                )
-        else:
-            assert len(batch_dims) >= 2, "Must be matrix or tensor"
-            assert np.equal.reduce(batch_dims), "Must have equal dimensions"
-            if len(batch_dims) != 2:
-                raise NotImplementedError("Not implemented for tensors")
-            if not full_cov:
-                raise NotImplementedError("Covariance must be full")
-
-            self.mean = Parameter(
-                np.zeros(dims, dtype=float_type),
-                transform=transforms.Transpose()(transforms.DiagonalMatrix()),
-            )
+        if full_cov:
             self.chol_cov = Parameter(
-                batched_identity(n, (batch_dims[0],)),
-                transform=transforms.CovarianceMatrix(n, batch_dims[0]),
+                batched_identity(n, shared_batch),
+                transform=covariance_matrix_bijector,
+            )
+        else:
+            self.chol_cov = Parameter(
+                batched_identity(n, shared_batch),
+                transform=diagonal_variance_bijector,
             )
 
     @property
-    @params_as_tensors
-    def cov(self):
+    def cov(self) -> tf.Tensor:
         return tf.matmul(self.chol_cov, self.chol_cov, transpose_b=True, name="cov")
